@@ -4,6 +4,8 @@ from PySide6.QtWidgets import (
     QTextEdit, QLabel, QFileDialog, QRadioButton,
     QGroupBox
 )
+
+
 import sys
 
 class DetectorApp(QMainWindow):
@@ -20,17 +22,11 @@ class DetectorApp(QMainWindow):
         input_group = QGroupBox("Input")
         input_layout = QVBoxLayout(input_group)
 
-        self.radio_text = QRadioButton("Paste text")
-        self.radio_file = QRadioButton("Upload .docx file")
-        self.radio_text.setChecked(True)
-
-        input_layout.addWidget(self.radio_text)
 
         self.text_box = QTextEdit()
         self.text_box.setPlaceholderText("Paste or type text here...")
         input_layout.addWidget(self.text_box)
 
-        input_layout.addWidget(self.radio_file)
 
         file_layout = QHBoxLayout()
         self.file_label = QLabel("No file selected")
@@ -47,6 +43,7 @@ class DetectorApp(QMainWindow):
         # -------- Analyze Button --------
         self.analyze_button = QPushButton("Analyze")
         layout.addWidget(self.analyze_button)
+        self.analyze_button.clicked.connect(self.analyse_essay)
 
         # -------- Results --------
         results_group = QGroupBox("Results")
@@ -63,15 +60,25 @@ class DetectorApp(QMainWindow):
         # -------- Status --------
         self.statusBar().showMessage("Ready")
 
+    def analyse_essay(self):
+        text = self.text_box.toPlainText()
+        print(text)
+        from essay_analyzer import predict_essay
+        results = predict_essay(text)
+        print(results)
+
     def select_file(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select document", "", "Word Documents (*.docx)"
         )
         if path:
             self.file_label.setText(path)
+            
 
 
 app = QApplication(sys.argv)
 window = DetectorApp()
 window.show()
 sys.exit(app.exec())
+
+
