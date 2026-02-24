@@ -1,0 +1,21 @@
+--pre
+--extra-index-url https://download.pytorch.org/whl/nightly/cu130
+
+torch
+torchvision
+
+pyside6
+scikit-learn==1.3.2
+numpy
+tqdm
+pandas
+torch
+nltk
+textstat
+scipy
+joblib
+torch
+pyside6
+python-docx
+numpy
+transformers
