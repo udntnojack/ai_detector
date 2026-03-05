@@ -4,7 +4,15 @@ from PySide6.QtWidgets import (
     QTextEdit, QLabel, QFileDialog, QRadioButton,
     QGroupBox
 )
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+from docx import Document
+from PyPDF2 import PdfReader
+import os
 
+from gauge import GaugeWidget
+
+from essay_analyzer import predict_essay
 
 import sys
 
@@ -51,9 +59,12 @@ class DetectorApp(QMainWindow):
 
         self.result_label = QLabel("Prediction: —")
         self.confidence_label = QLabel("Confidence: —")
+        self.gauge = GaugeWidget()
+        
 
         results_layout.addWidget(self.result_label)
         results_layout.addWidget(self.confidence_label)
+        results_layout.addWidget(self.gauge, alignment=Qt.AlignRight)
 
         layout.addWidget(results_group)
 
@@ -61,18 +72,107 @@ class DetectorApp(QMainWindow):
         self.statusBar().showMessage("Ready")
 
     def analyse_essay(self):
-        text = self.text_box.toPlainText()
-        print(text)
-        from essay_analyzer import predict_essay
+        text = self.text_box.toPlainText().strip()
+        if not text:
+            return
+
+        self.statusBar().showMessage("Analyzing...")
+
         results = predict_essay(text)
-        print(results)
+
+        conf = results["meta_results"][0]
+        label = ""
+        if(conf < 0.30):
+            label = "unlikely to be AI generated"
+        elif(conf < 0.70):
+            label = "likely contains AI generated elements"
+        elif(conf > 0.70):
+            label = "likely to be ai generated"
+        
+
+        sentence_probs = results["sentence_results"]
+
+        self.result_label.setText(f"Prediction: {label}")
+        self.confidence_label.setText(f"Confidence: {conf:.2%}")
+
+        self.gauge.setValue(int(conf * 100))
+
+        self.highlight_sentences(sentence_probs)
+        self.statusBar().showMessage("Done")
+
+    def highlight_sentences(self, sentence_probs):
+        doc = self.text_box.document()
+
+        # clear previous formatting
+        cursor = QTextCursor(doc)
+        cursor.select(QTextCursor.Document)
+        cursor.setCharFormat(QTextCharFormat())
+
+        fmt = QTextCharFormat()
+        fmt.setBackground(QColor("#ffcccc"))
+
+        for sentence in sentence_probs:
+            s = sentence["sentence"]
+            prob = sentence["prob"]
+            if prob > 0.40:
+                if prob < 0.50:
+                    fmt.setBackground(QColor("#fbff00"))
+                elif prob < 0.60:
+                    fmt.setBackground(QColor("#ff9100"))
+                elif prob > 0.70:
+                    fmt.setBackground(QColor("#ff4040"))
+                else:
+                    break
+
+                find_cursor = QTextCursor(doc)
+                while True:
+                    find_cursor = doc.find(s, find_cursor)
+                    if find_cursor.isNull():
+                        break
+                    find_cursor.mergeCharFormat(fmt)
 
     def select_file(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select document", "", "Word Documents (*.docx)"
+                self,
+                "Select document",
+                "",
+                "Documents (*.docx *.pdf *.txt)"
         )
         if path:
             self.file_label.setText(path)
+            self.addText(path)
+
+    def addText(self, path):
+        ext = os.path.splitext(path)[1].lower()
+
+        if ext == ".docx":
+            text = self.load_docx(path)
+        elif ext == ".pdf":
+            text = self.load_pdf(path)
+        elif ext == ".txt":
+            text = self.load_txt(path)
+        else:
+            text = ""
+        self.text_box.setPlainText(text)
+
+    def load_docx(self, path):
+        doc = Document(path)
+        return "\n".join(p.text for p in doc.paragraphs)
+
+
+    def load_pdf(self, path):
+        reader = PdfReader(path)
+        pages = [page.extract_text() or "" for page in reader.pages]
+        return "\n".join(pages)
+
+
+    def load_txt(self, path):
+        with open(path, "r", encoding="utf-8", errors="ignore") as f:
+            return f.read()
+
+
+
+        
             
 
 
