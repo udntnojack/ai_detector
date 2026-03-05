@@ -8,6 +8,7 @@ import numpy as np
 from scipy.stats import entropy
 import torch
 import json
+import sys
 from tqdm import tqdm
 from itertools import chain
 
@@ -16,13 +17,17 @@ lm_model = {
     "gpt2": LMLogProbs("gpt2-medium")
 }
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(BASE_DIR, "classifiers\\")
+def resource_path(rel_path):
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.join(sys._MEIPASS, rel_path)
+    return os.path.join(os.path.abspath("."), rel_path)
 
-sentence_model = joblib.load(MODEL_DIR + "sentence_rf_detector_calibrated-all-data.joblib", mmap_mode="r")
+MODEL_DIR = resource_path("classifiers\\")
+
+sentence_model = joblib.load(MODEL_DIR + "sentence_rf_detector_calibrated-all-data.joblib")
 sentence_scaler = joblib.load(MODEL_DIR + "scaler_sentence_rf-all-data.joblib")
 
-meta_model = joblib.load(MODEL_DIR + "meta_classifier-all-data-lf.joblib", mmap_mode="r")
+meta_model = joblib.load(MODEL_DIR + "meta_classifier-all-data-lf.joblib")
 meta_scaler = joblib.load(MODEL_DIR + "scaler_meta-all-data-lf.joblib")
 
 def predict_sentence_probs(text_list):
@@ -207,6 +212,10 @@ def sentence_probs(text):
     results = []
 
     for s in sentences:
+        
+        if len(s) < 5:
+            continue
+
         tokens_gpt2, log_probs_gpt2 = get_batch_token_logprobs_and_tokens(
             lm_model["gpt2"], [s]
         )[0]
