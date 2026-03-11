@@ -5,7 +5,6 @@ from get_logprobs import LMLogProbs
 from feature_extractor import get_features
 from feature_extractor import split_sentences_max_words
 import numpy as np
-from scipy.stats import entropy
 import torch
 import json
 import sys
@@ -13,22 +12,28 @@ from tqdm import tqdm
 from itertools import chain
 
 
-lm_model = {
-    "gpt2": LMLogProbs("gpt2-medium")
-}
+
 
 def resource_path(rel_path):
     if hasattr(sys, "_MEIPASS"):
-        return os.path.join(sys._MEIPASS, rel_path)
-    return os.path.join(os.path.abspath("."), rel_path)
+        path = os.path.join(sys._MEIPASS, rel_path)
+    else:
+        path = os.path.join(os.path.abspath("."), rel_path)
+    # convert backslashes to forward slashes for Transformers
+    return path.replace("\\", "/")
 
-MODEL_DIR = resource_path("classifiers\\")
+lm_model = {
+    "gpt2": LMLogProbs(resource_path(os.path.join("models","gpt2-medium")))
+}
 
-sentence_model = joblib.load(MODEL_DIR + "sentence_rf_detector_calibrated-all-data.joblib")
-sentence_scaler = joblib.load(MODEL_DIR + "scaler_sentence_rf-all-data.joblib")
+MODEL_DIR = resource_path("classifiers")
 
-meta_model = joblib.load(MODEL_DIR + "meta_classifier-all-data-lf.joblib")
-meta_scaler = joblib.load(MODEL_DIR + "scaler_meta-all-data-lf.joblib")
+# always join paths so we don't accidentally concatenate without a separator
+sentence_model = joblib.load(os.path.join(MODEL_DIR, "sentence_rf_detector_calibrated-all-data.joblib"))
+sentence_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler_sentence_rf-all-data.joblib"))
+
+meta_model = joblib.load(os.path.join(MODEL_DIR, "meta_classifier-all-data-v2.joblib"))
+meta_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler_meta-all-data-v2.joblib"))
 
 def predict_sentence_probs(text_list):
     feats = []
@@ -68,9 +73,7 @@ def get_essay_features(text):
     avg_sent_len = num_tokens / max(1, num_sentences)
     return np.array([num_sentences, num_tokens, avg_sent_len])
 
-# -----------------------------
-# Prepare meta features for one essay
-# -----------------------------
+
 def prepare_meta_features(sent_results):
     # sentence-level probabilities
     texts = []
@@ -142,14 +145,9 @@ def prepare_meta_features(sent_results):
         sent_lens.min(),
     ])
 
-    # -----------------------------
-    # ESSAY FEATURES (your existing)
-    # -----------------------------
+
     essay_feats = get_essay_features(texts)
 
-    # -----------------------------
-    # FINAL META VECTOR
-    # -----------------------------
     meta_features = np.concatenate([
         agg_chunk_feats,
         dist_feats,
@@ -162,8 +160,8 @@ def prepare_meta_features(sent_results):
 
     return meta_features.astype(np.float32)
 
-BATCH_SIZE = 16       # Number of sentences per batch
-MAX_TOKENS = 1024     # Max tokens per sentence
+BATCH_SIZE = 16       
+MAX_TOKENS = 1024    
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 window = 4
 
@@ -171,8 +169,8 @@ for model_name, lm in lm_model.items():
     if lm.tokenizer.pad_token is None:
         lm.tokenizer.pad_token = lm.tokenizer.eos_token
     lm.model.to(DEVICE)
+    lm.model.float()
     lm.model.eval()
-    lm.model.half()
 
 def get_batch_token_logprobs_and_tokens(lm, texts, max_length=MAX_TOKENS):
     enc = lm.tokenizer(
@@ -187,13 +185,12 @@ def get_batch_token_logprobs_and_tokens(lm, texts, max_length=MAX_TOKENS):
     attention_mask = enc["attention_mask"]
 
     with torch.no_grad():
-        with torch.cuda.amp.autocast():
-            out = lm.model(input_ids=input_ids, attention_mask=attention_mask)
-            log_probs = torch.nn.functional.log_softmax(out.logits, dim=-1)
-    
-            token_logps = log_probs.gather(
-                2, input_ids[:, 1:].unsqueeze(-1)
-            ).squeeze(-1)
+        out = lm.model(input_ids=input_ids, attention_mask=attention_mask)
+        log_probs = torch.nn.functional.log_softmax(out.logits, dim=-1)
+
+        token_logps = log_probs.gather(
+            2, input_ids[:, 1:].unsqueeze(-1)
+        ).squeeze(-1)
 
     lengths = attention_mask.sum(dim=1) - 1
 
@@ -247,22 +244,15 @@ def chunk_probs(text):
     for c in chunks:
             
         tokens_gpt2, log_probs_gpt2 = get_batch_token_logprobs_and_tokens(lm_model["gpt2"], [c])[0]
-        #tokens_pythia, log_probs_pythia = get_batch_token_logprobs_and_tokens(lm_models["pythia"], [c])[0]  
 
         feats = get_features(log_probs_gpt2, c)
     
         if feats is None:
             continue
 
-        
-        feats = feats.reshape(1, -1)   # 🔑 REQUIRED
+        feats = feats.reshape(1, -1)  
 
-        #Xc = scaler_chunk.transform(feats)
-        #prob = chunk_model.predict_proba(Xc)[0, 1]
-#
-        #print("Chunk feats:", combined)
-        #print("Any NaN:", np.isnan(combined).any())
-        #print("Std:", np.std(combined))
+        prob = 0.0
 
         results.append({
             "chunk": c,
@@ -284,3 +274,8 @@ def predict_essay(text):
         "meta_results": meta_results
         #"chunks": chunk_results
     }
+
+def entropy(p):
+    p = np.asarray(p)
+    p = p[p > 0]
+    return -np.sum(p * np.log(p))

@@ -1,12 +1,13 @@
 
 import numpy as np
-import nltk
-nltk.download('punkt')
-nltk.download('punkt_tab')
-from nltk.tokenize import sent_tokenize
 from collections import Counter
-from scipy.stats import skew, kurtosis
 import textstat
+
+import re
+
+def split_sentences(text):
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    return [s for s in sentences if s]
 
 def as_vec(x):
     """Force x to be a 1D numpy vector."""
@@ -120,7 +121,7 @@ def readability_features(text):
 #    ])
 
 def split_sentences_max_words(text, max_words=100):
-    sentences = sent_tokenize(text)
+    sentences = split_sentences(text)
     chunks = []
     for sent in sentences:
         words = sent.split()
@@ -248,3 +249,23 @@ def cross_model_disagreement(lp_a, lp_b):
 
     # disagreement = average absolute difference
     return float(np.mean(np.abs(a - b)))
+
+def skew(x):
+    x = np.asarray(x)
+    mean = np.mean(x)
+    std = np.std(x)
+
+    if std == 0:
+        return 0.0
+
+    return np.mean(((x - mean) / std) ** 3)
+
+def kurtosis(x):
+    x = np.asarray(x)
+    mean = np.mean(x)
+    std = np.std(x)
+
+    if std == 0:
+        return 0.0
+
+    return np.mean(((x - mean) / std) ** 4) - 3

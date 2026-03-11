@@ -5,15 +5,17 @@ from PySide6.QtWidgets import (
     QGroupBox
 )
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QIcon
 from docx import Document
 from PyPDF2 import PdfReader
 import os
+from essayThread import EssayWorker 
+os.environ["TORCH_DISABLE_DYNAMO"] = "1"
+os.environ["TORCH_COMPILE_MODE"] = "OFF"
 
 from gauge import GaugeWidget
 
 from essay_analyzer import predict_essay
-
 import sys
 
 class DetectorApp(QMainWindow):
@@ -75,12 +77,22 @@ class DetectorApp(QMainWindow):
         text = self.text_box.toPlainText().strip()
         if not text:
             return
+        
+        self.worker = EssayWorker(text)
 
-        self.statusBar().showMessage("Analyzing...")
+        self.worker.progress.connect(self.update_status)
+        self.worker.finished.connect(self.analysis_complete)
 
-        results = predict_essay(text)
+        self.worker.start()
 
-        conf = results["meta_results"][0]
+
+
+    def update_status(self, msg):
+        self.statusBar().showMessage(msg)
+
+    def analysis_complete(self, result):
+
+        conf = result["meta_results"][0]
         label = ""
         if(conf < 0.30):
             label = "unlikely to be AI generated"
@@ -90,7 +102,7 @@ class DetectorApp(QMainWindow):
             label = "likely to be ai generated"
         
 
-        sentence_probs = results["sentence_results"]
+        sentence_probs = result["sentence_results"]
 
         self.result_label.setText(f"Prediction: {label}")
         self.confidence_label.setText(f"Confidence: {conf:.2%}")
@@ -109,7 +121,7 @@ class DetectorApp(QMainWindow):
         cursor.setCharFormat(QTextCharFormat())
 
         fmt = QTextCharFormat()
-        fmt.setBackground(QColor("#ffcccc"))
+        fmt.setForeground(QColor("black"))
 
         for sentence in sentence_probs:
             s = sentence["sentence"]
@@ -170,13 +182,17 @@ class DetectorApp(QMainWindow):
         with open(path, "r", encoding="utf-8", errors="ignore") as f:
             return f.read()
 
-
-
+def resource_path(relative_path):
+    """Get absolute path for PyInstaller or dev environment."""
+    if hasattr(sys, "_MEIPASS"):  # PyInstaller temp folder
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.dirname(__file__), relative_path)
+      
         
-            
-
 
 app = QApplication(sys.argv)
+icon_path = resource_path("logo.ico")
+app.setWindowIcon(QIcon(icon_path))
 window = DetectorApp()
 window.show()
 sys.exit(app.exec())
