@@ -1,14 +1,33 @@
 import re
 import torch
 import numpy as np
-from transformers import AutoTokenizer, AutoModelForCausalLM
+import os
+
+# Prevent transformers from importing every architecture
+os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+from transformers import GPT2TokenizerFast
+from transformers import GPT2LMHeadModel
 
 class LMLogProbs:
-    def __init__(self, model_name="distilgpt2"):
-        self.device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name).to(self.device)
+    def __init__(self, model_path="distilgpt2"):
+        self.device = "cpu"
+        model_path = os.path.abspath(model_path).replace("\\", "/")
+
+        self.tokenizer = GPT2TokenizerFast.from_pretrained(
+            model_path,
+            local_files_only=True
+        )
+
+        self.model = GPT2LMHeadModel.from_pretrained(
+            model_path,
+            local_files_only=True
+        ).to(self.device)
+
         self.model.eval()
+        torch.set_grad_enabled(False)
 
     def tokenize(self, text):
         return self.tokenizer(text, return_tensors="pt")["input_ids"].to(self.device) 
