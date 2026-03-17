@@ -74,10 +74,12 @@ def get_essay_features(text):
     return np.array([num_sentences, num_tokens, avg_sent_len])
 
 
-def prepare_meta_features(sent_results):
+def prepare_meta_features(sent_results, progress_callback=None):
     # sentence-level probabilities
     texts = []
     p = []
+    if progress_callback:
+        progress_callback(f"Processing essay feature")
 
     for sent in sent_results:
         texts.append(sent["sentence"])
@@ -203,13 +205,15 @@ def get_batch_token_logprobs_and_tokens(lm, texts, max_length=MAX_TOKENS):
 
     return results
 
-def sentence_probs(text):
+def sentence_probs(text, progress_callback=None):
     sentences = split_sentences_max_words(text)
 
     results = []
+    total = len(sentences)
 
-    for s in sentences:
-        
+    for i, s in enumerate(sentences):
+        if progress_callback:
+            progress_callback(f"Processing sentence {i+1}/{total}")
         if len(s) < 5:
             continue
 
@@ -262,11 +266,11 @@ def chunk_probs(text):
 
     return results
 
-def predict_essay(text):
-    sent_results = sentence_probs(text)
+def predict_essay(text, progress_callback=None):
+    sent_results = sentence_probs(text, progress_callback)
 
 
-    meta_features = prepare_meta_features(sent_results)
+    meta_features = prepare_meta_features(sent_results, progress_callback)
     meta_results = meta_predict(meta_features)
 
     return {

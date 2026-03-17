@@ -13,6 +13,6 @@ class EssayWorker(QThread):
         
         
         self.progress.emit("Analyzing please wait...")
-        result = predict_essay(self.text)
+        result = predict_essay(self.text, progress_callback=self.progress.emit)
 
         self.finished.emit(result)
