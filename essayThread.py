@@ -1,5 +1,5 @@
 from PySide6.QtCore import QThread, Signal
-from essay_analyzer import predict_essay
+
 
 class EssayWorker(QThread):
     finished = Signal(dict)
@@ -10,7 +10,8 @@ class EssayWorker(QThread):
         self.text = text
 
     def run(self):
-        
+        self.progress.emit("loading LLM model please wait...")
+        from essay_analyzer import predict_essay   
         
         self.progress.emit("Analyzing please wait...")
         result = predict_essay(self.text, progress_callback=self.progress.emit)

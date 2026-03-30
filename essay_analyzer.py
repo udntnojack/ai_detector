@@ -29,18 +29,22 @@ lm_model = {
 MODEL_DIR = resource_path("classifiers")
 
 # always join paths so we don't accidentally concatenate without a separator
-sentence_model = joblib.load(os.path.join(MODEL_DIR, "sentence_rf_detector_calibrated-all-data.joblib"))
-sentence_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler_sentence_rf-all-data.joblib"))
+sentence_model = joblib.load(os.path.join(MODEL_DIR, "sentence_rf_detector_calibrated.joblib"))
+sentence_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler_sentence_rf.joblib"))
 
-meta_model = joblib.load(os.path.join(MODEL_DIR, "meta_classifier-all-data-v2.joblib"))
-meta_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler_meta-all-data-v2.joblib"))
+meta_model = joblib.load(os.path.join(MODEL_DIR, "meta_classifier.joblib"))
+meta_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler_meta.joblib"))
 
 def predict_sentence_probs(text_list):
     feats = []
 
     for item in text_list:
         f = get_features(item["log_prob"], item["sentence"])
+        f = np.delete(f, [11, 12, 13, 14, 15, 19, 20, 21])
         feats.append(f)
+
+    if len(feats) == 0:
+        return np.array([])
 
     X = np.vstack(feats)
     X_scaled = sentence_scaler.transform(X)
@@ -63,6 +67,8 @@ def get_chunk_features(sentence_probs, chunk_size=4):
             chunk.max(),
             chunk.min(),
             chunk.std(),
+            np.percentile(chunk, 10),
+            np.percentile(chunk, 90),
             np.median(chunk)
         ])
     return np.vstack(chunk_feats)
@@ -74,93 +80,102 @@ def get_essay_features(text):
     return np.array([num_sentences, num_tokens, avg_sent_len])
 
 
-def prepare_meta_features(sent_results, progress_callback=None):
-    # sentence-level probabilities
-    texts = []
-    p = []
+def prepare_meta_features(texts, progress_callback=None):
+
     if progress_callback:
-        progress_callback(f"Processing essay feature")
+        progress_callback("prepare_meta_features")
+    # sentence-level probabilities
+    sentence_probs = predict_sentence_probs(texts)
 
-    for sent in sent_results:
-        texts.append(sent["sentence"])
-        p.append(sent["prob"])
+    
 
-    p = np.array(p)
+    p = np.array(sentence_probs)
 
     if len(p) < 3:
-        return np.zeros(40)
+        return np.zeros(14)
 
-
-    chunk_feats = get_chunk_features(p)
-    agg_chunk_feats = np.concatenate([
-        chunk_feats.mean(axis=0),
-        chunk_feats.max(axis=0),
-        chunk_feats.min(axis=0)
-    ])
-
-
+    # -----------------------------
+    # 🔥 CORE DISTRIBUTION FEATURES
+    # -----------------------------
     dist_feats = np.array([
-        p.mean(),
-        p.std(),
-        p.min(),
-        p.max(),
-        np.median(p),
-        np.percentile(p, 25),
-        np.percentile(p, 75),
-        entropy(p + 1e-8),
+        p.mean(),                         # overall confidence
+        p.std(),                          # spread
+        np.min(p),                        # weakest sentence
+        np.percentile(p, 25),             # lower quartile
+        np.percentile(p, 75),             # upper quartile
+        entropy(p + 1e-8),                # randomness
     ])
 
-
-    dp = np.diff(p)
-    dyn_feats = np.array([
-        np.mean(np.abs(dp)),     # volatility
-        np.std(dp),              # burstiness
-        np.max(np.abs(dp)),      # max jump
-        np.polyfit(np.arange(len(p)), p, 1)[0],  # slope
-    ])
-
-
+    # -----------------------------
+    # 🔥 LOW-PROBABILITY MASS (VERY IMPORTANT)
+    # -----------------------------
     prop_feats = np.array([
-        np.mean(p > 0.9),
-        np.mean(p > 0.8),
+        np.mean(p < 0.05),                # strongest signal
+        np.mean(p < 0.1),
         np.mean(p < 0.2),
     ])
 
+    # -----------------------------
+    # 🔥 CHUNK EXTREMES (KEY)
+    # -----------------------------
+    chunk_feats = get_chunk_features(p)
+
+    chunk_min = chunk_feats.min(axis=0)
+    
+
+    chunk_selected = np.concatenate([
+        [chunk_min[2]],   # ✅ wrap
+        [chunk_min[5]],   # ✅ wrap
+    ])
+
+    # -----------------------------
+    # 🔥 POSITION SIGNAL
+    # -----------------------------
     third = len(p) // 3
     if third > 0:
         pos_feats = np.array([
             p[:third].mean(),
-            p[third:2*third].mean(),
-            p[2*third:].mean(),
+            p[-third:].mean(),  # end_mean (important)
         ])
     else:
-        pos_feats = np.zeros(3)
-    
+        pos_feats = np.zeros(2)
 
+    #prop_grad= np.array([
+    #    np.mean(np.diff(p)),
+    #    np.std(np.diff(p)),
+    #    np.max(np.abs(np.diff(p)))
+    #])
 
+    low_mask = (p < 0.1).astype(int)
+    max_run = max_consecutive_ones(low_mask)/ len(p)
 
-    sent_lens = np.array([len(s.split()) for s in texts])
-    struct_feats = np.array([
-        sent_lens.mean(),
-        sent_lens.std(),
-        sent_lens.max(),
-        sent_lens.min(),
-    ])
-
-
-    essay_feats = get_essay_features(texts)
-
+    # -----------------------------
+    # FINAL VECTOR
+    # -----------------------------
     meta_features = np.concatenate([
-        agg_chunk_feats,
         dist_feats,
-        dyn_feats,
         prop_feats,
+        chunk_selected,
         pos_feats,
-        struct_feats,
-        essay_feats
+        #prop_grad,
+        [max_run]   # wrap scalar
     ])
 
     return meta_features.astype(np.float32)
+
+def max_consecutive_ones(arr):
+    max_run = 0
+    current_run = 0
+
+    for x in arr:
+        if x == 1:
+            current_run += 1
+            if current_run > max_run:
+                max_run = current_run
+        else:
+            current_run = 0
+
+    return max_run
 
 BATCH_SIZE = 16       
 MAX_TOKENS = 1024    

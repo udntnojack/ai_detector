@@ -15,7 +15,6 @@ os.environ["TORCH_COMPILE_MODE"] = "OFF"
 
 from gauge import GaugeWidget
 
-from essay_analyzer import predict_essay
 import sys
 
 class DetectorApp(QMainWindow):
@@ -74,16 +73,31 @@ class DetectorApp(QMainWindow):
         self.statusBar().showMessage("Ready")
 
     def analyse_essay(self):
+        # Prevent multiple threads
+        if hasattr(self, "worker") and self.worker is not None and self.worker.isRunning():
+            return
+    
         text = self.text_box.toPlainText().strip()
         if not text:
             return
-        
+    
+        # Disable UI (important)
+        self.analyze_button.setEnabled(False)
+    
         self.worker = EssayWorker(text)
-
+    
         self.worker.progress.connect(self.update_status)
         self.worker.finished.connect(self.analysis_complete)
-
+    
+        # Clean up thread properly
+        self.worker.finished.connect(self.cleanup_worker)
+    
         self.worker.start()
+
+    def cleanup_worker(self):
+        if self.worker:
+            self.worker.deleteLater()
+            self.worker = None
 
 
 
@@ -108,9 +122,11 @@ class DetectorApp(QMainWindow):
         self.confidence_label.setText(f"Confidence: {conf:.2%}")
 
         self.gauge.setValue(int(conf * 100))
+        
 
         self.highlight_sentences(sentence_probs)
         self.statusBar().showMessage("Done")
+        self.analyze_button.setEnabled(True)
 
     def highlight_sentences(self, sentence_probs):
         doc = self.text_box.document()
