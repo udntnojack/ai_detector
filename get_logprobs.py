@@ -12,7 +12,7 @@ from transformers import GPT2TokenizerFast
 from transformers import GPT2LMHeadModel
 
 class LMLogProbs:
-    def __init__(self, model_path="distilgpt2"):
+    def __init__(self, model_path="gpt2-medium"):
         self.device = "cpu"
         model_path = os.path.abspath(model_path).replace("\\", "/")
 
@@ -28,6 +28,7 @@ class LMLogProbs:
 
         self.model.eval()
         torch.set_grad_enabled(False)
+
 
     def tokenize(self, text):
         return self.tokenizer(text, return_tensors="pt")["input_ids"].to(self.device) 

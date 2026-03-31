@@ -1,3 +1,6 @@
+import os
+os.environ["TORCH_DISABLE_DYNAMO"] = "1"
+os.environ["TORCH_COMPILE_MODE"] = "OFF"
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
     QVBoxLayout, QHBoxLayout, QPushButton,
@@ -8,10 +11,9 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QIcon
 from docx import Document
 from PyPDF2 import PdfReader
-import os
+
 from essayThread import EssayWorker 
-os.environ["TORCH_DISABLE_DYNAMO"] = "1"
-os.environ["TORCH_COMPILE_MODE"] = "OFF"
+
 
 from gauge import GaugeWidget
 
@@ -90,14 +92,9 @@ class DetectorApp(QMainWindow):
         self.worker.finished.connect(self.analysis_complete)
     
         # Clean up thread properly
-        self.worker.finished.connect(self.cleanup_worker)
     
         self.worker.start()
 
-    def cleanup_worker(self):
-        if self.worker:
-            self.worker.deleteLater()
-            self.worker = None
 
 
 
@@ -127,6 +124,7 @@ class DetectorApp(QMainWindow):
         self.highlight_sentences(sentence_probs)
         self.statusBar().showMessage("Done")
         self.analyze_button.setEnabled(True)
+        self.worker.finished.connect(self.worker.deleteLater)
 
     def highlight_sentences(self, sentence_probs):
         doc = self.text_box.document()
