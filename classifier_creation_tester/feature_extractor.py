@@ -1,0 +1,252 @@
+
+import numpy as np
+import nltk
+nltk.download('punkt')
+nltk.download('punkt_tab')
+from nltk.tokenize import sent_tokenize
+from collections import Counter
+from scipy.stats import skew, kurtosis
+
+FEATURE_DIM = 27
+
+def as_vec(x):
+    """Force x to be a 1D numpy vector."""
+    return np.atleast_1d(np.asarray(x, dtype=np.float64))
+
+def get_features(gpt2_rec, text=0):
+    if text != 0:
+        gpt2_sent = text
+        gpt2_log_prob = gpt2_rec
+    else:
+        gpt2_sent = gpt2_rec.text
+        gpt2_log_prob = gpt2_rec.word_log_probs
+
+    # ---- basic guards ----
+    if not isinstance(gpt2_sent, str) or len(gpt2_sent) < 5:
+        return np.zeros(FEATURE_DIM, dtype=np.float64)
+
+    if gpt2_log_prob is None or len(gpt2_log_prob) == 0:
+        return np.zeros(FEATURE_DIM, dtype=np.float64)
+
+    # ---- sentence stats ----
+    sentences = split_sentences_max_words(gpt2_sent)
+    sent_feats = []
+    for s in sentences:
+        sf = sentence_stats_features(s)
+        if sf is not None:
+            sent_feats.append(sf)
+
+    if len(sent_feats) == 0:
+        sent_feats = np.zeros(5, dtype=np.float64)
+    else:
+        sent_feats = np.mean(np.vstack(sent_feats), axis=0)
+
+    # ---- logprob features ----
+    gpt2_base = extract_word_features(gpt2_log_prob)
+    log_var   = local_variance(gpt2_log_prob)
+    readability = readability_features(gpt2_sent)
+    #readability = readability * 0.3
+
+    # ---- SAFE concatenate ----
+    return np.concatenate([
+        as_vec(gpt2_base),
+        as_vec(readability),
+        as_vec(log_var),
+        as_vec(sent_feats),
+    ])
+
+
+
+def local_variance(logps, k=5):
+    if len(logps) < k:
+        return [0,0,0]
+    vars = [np.var(logps[i:i+k]) for i in range(len(logps)-k+1)]
+    return np.array([
+        np.mean(vars),
+        np.std(vars),
+        np.max(vars)
+    ], dtype=np.float64)
+
+def token_diversity(tokens):
+    val = len(set(tokens)) / len(tokens)
+    return np.array([val], dtype=np.float64)
+
+import textstat
+
+def readability_features(text):
+    try:
+        vals = [
+            textstat.flesch_reading_ease(text),
+            textstat.flesch_kincaid_grade(text),  # ✅ fixed
+            textstat.gunning_fog(text)
+        ]
+    except Exception:
+        vals = [0.0, 0.0, 0.0]
+
+    return np.asarray(vals, dtype=np.float64)
+
+#def get_features(pythia_rec, gpt2_rec, text):   
+#    gpt2_sent = text
+#    gpt2_log_prob = gpt2_rec
+#    pythia_log_prob = pythia_rec
+#    # skip very short junk
+#    if len(gpt2_sent) < 5:
+#        return np.zeros(8, dtype=np.float64)
+#    if len(gpt2_log_prob) == 0 or len(gpt2_log_prob) == 0:
+#        return np.zeros(8, dtype=np.float64)
+#    sentences = split_sentences_max_words(gpt2_sent)
+#    sent_feats =[]
+#    for s in sentences:
+#        sent_feats.append(sentence_stats_features(s))
+#    sent_feats = np.vstack(sent_feats)
+#    sent_feats = np.mean(sent_feats, axis=0)    
+#    if len(gpt2_log_prob) == 0:
+#        return np.zeros(8, dtype=np.float64)
+#    # ---------- GPT2 features ----------
+#    gpt2_base = extract_word_features(gpt2_log_prob)
+#    #gpt2_intra = np.clip(np.var(gpt2_log_prob), 0, 5)
+#    #gpt2_burst = np.clip(get_burstiness(gpt2_log_prob), 0, 5)
+#    gpt2_feats = np.concatenate([gpt2_base])
+#    pythia_base = extract_word_features(pythia_log_prob)
+#    #pythia_intra = np.clip(np.var(pythia_log_prob), 0, 5)
+#    #pythia_burst = np.clip(get_burstiness(pythia_log_prob), 0, 5)
+#    pythia_feats = np.concatenate([pythia_base])
+#    pythia_perplexity = get_perplexity(pythia_log_prob)
+#    gpt2_perplexity = get_perplexity(gpt2_log_prob)
+#    disagree_val = cross_model_disagreement(pythia_perplexity, gpt2_perplexity)
+#    return np.concatenate([
+#        gpt2_feats,
+#        pythia_feats,
+#        [disagree_val],
+#        sent_feats
+#    ])
+
+def split_sentences_max_words(text, max_words=100):
+    sentences = sent_tokenize(text)
+    chunks = []
+    for sent in sentences:
+        words = sent.split()
+        if len(words) <= max_words:
+            chunks.append(sent)
+        else:
+            # split long sentence only\n",
+            for i in range(0, len(words), max_words):
+                chunks.append(" ".join(words[i:i+max_words]))
+    return chunks
+    
+def extract_word_features(word_log_probs):
+    log_probs = np.asarray(word_log_probs, dtype=np.float64)
+
+    if log_probs.size == 0:
+        return np.zeros(16, dtype=np.float64)
+
+    # clip insane values
+    log_probs = np.clip(log_probs, -50, 0)
+
+    probs = np.exp(log_probs)
+
+    # ----- core stats -----
+    mean_lp   = np.mean(log_probs)
+    var_lp    = np.var(log_probs)
+    std_lp    = np.std(log_probs)
+    min_lp    = np.min(log_probs)
+    max_lp    = np.max(log_probs)
+    median_lp = np.median(log_probs)
+
+    q25_lp = np.percentile(log_probs, 25)
+    q75_lp = np.percentile(log_probs, 75)
+    iqr_lp = q75_lp - q25_lp
+
+    per10_lp = np.percentile(log_probs, 10)
+    per90_lp = np.percentile(log_probs, 90)
+
+    skew_val     = skew(log_probs)
+    kurtosis_val = kurtosis(log_probs)
+
+    # ----- perplexity -----
+    mean_ppl = np.exp(-mean_lp)
+    var_ppl  = np.var(np.exp(-log_probs))
+
+    # ----- entropy -----
+    entropy = -np.mean(probs * log_probs)
+
+    # ----- normalized dispersion -----
+    cv_lp = std_lp / (abs(mean_lp) + 1e-8)
+
+    return np.array([
+        mean_lp,
+        std_lp,
+        var_lp,
+        min_lp,
+        max_lp,
+        median_lp,
+        q25_lp,
+        q75_lp,
+        iqr_lp,
+        per10_lp,
+        per90_lp,
+        skew_val,
+        kurtosis_val,
+        mean_ppl,
+        entropy,
+        cv_lp
+    ], dtype=np.float64)
+
+def sentence_stats_features(sentence):
+    """
+    Compute aggregate sentence-level stats for a list of sentences.
+    
+    Returns:
+        [mean_len, std_len, mean_rep, max_rep]
+    """
+    lengths = []
+    rep_counts = []
+
+    word_lengths = []
+
+    
+    words = sentence.split()
+
+    if len(words) == 0:
+        # fallback for empty input
+        return np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+
+    for word in words:
+        word_lengths.append(len(word))
+
+    lengths.append(len(words))
+
+    counts = list(Counter(words).values())
+
+    #mean_len = float(np.mean(lengths))
+    #std_len = float(np.std(lengths))
+    mean_rep = float(np.mean(counts))
+    max_rep = float(np.max(counts))
+    #word_len = float(np.mean(word_lengths))
+    max_len = float(np.max(word_lengths))
+    min_len = float(np.min(word_lengths))
+    word_std = float(np.std(word_lengths))
+    word_var = float(np.var(word_lengths))
+
+    return np.array([mean_rep, max_rep, max_len, min_len, word_std, word_var])
+
+def get_perplexity(log_probs):
+    log_probs = np.array(log_probs, dtype=np.float64)
+    return np.exp(-(log_probs))
+
+
+def cross_model_disagreement(lp_a, lp_b):
+    if len(lp_a) == 0 or len(lp_b) == 0:
+        return 0.0
+
+    # match lengths
+    n = min(len(lp_a), len(lp_b))
+    a = lp_a[:n]
+    b = lp_b[:n]
+
+    # normalize to comparable scale
+    a = (a - np.mean(a)) / (np.std(a) + 1e-8)
+    b = (b - np.mean(b)) / (np.std(b) + 1e-8)
+
+    # disagreement = average absolute difference
+    return float(np.mean(np.abs(a - b)))
