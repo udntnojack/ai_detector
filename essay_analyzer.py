@@ -179,7 +179,7 @@ def max_consecutive_ones(arr):
 
 BATCH_SIZE = 16       
 MAX_TOKENS = 1024    
-DEVICE = "cpu"
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 window = 4
 
 for model_name, lm in lm_model.items():
@@ -203,12 +203,12 @@ def get_batch_token_logprobs_and_tokens(lm, texts, max_length=MAX_TOKENS):
 
     with torch.no_grad():
         out = lm.model(input_ids=input_ids, attention_mask=attention_mask)
-        
+
         hidden_states = out.last_hidden_state
         logits = hidden_states @ lm.model.wte.weight.T
-        
+
         log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
-        
+
         token_logps = log_probs.gather(
             2, input_ids[:, 1:].unsqueeze(-1)
         ).squeeze(-1)
