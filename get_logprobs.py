@@ -8,8 +8,8 @@ os.environ["TRANSFORMERS_NO_ADVISORY_WARNINGS"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
-from transformers import GPT2TokenizerFast
-from transformers import GPT2LMHeadModel
+from transformers.models.gpt2 import GPT2TokenizerFast
+from transformers.models.gpt2.modeling_gpt2 import GPT2Model
 
 class LMLogProbs:
     def __init__(self, model_path="gpt2-medium"):
@@ -21,7 +21,7 @@ class LMLogProbs:
             local_files_only=True
         )
 
-        self.model = GPT2LMHeadModel.from_pretrained(
+        self.model = GPT2Model.from_pretrained(
             model_path,
             local_files_only=True
         ).to(self.device)
@@ -35,8 +35,11 @@ class LMLogProbs:
 
     def get_log_probs(self, text): 
         with torch.no_grad(): 
-            outputs = self.model(text) 
-            logits = outputs.logits 
+            outputs = self.model(text)
+            hidden_states = outputs.last_hidden_state
+
+# project to vocab manually using lm_head weights
+            logits = hidden_states @ self.model.wte.weight.T
             shift_logits = logits[:, :-1, :] 
             shift_labels = text[:, 1:] 
             log_probs = torch.log_softmax(shift_logits, dim=-1) 
