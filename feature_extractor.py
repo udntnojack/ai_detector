@@ -66,10 +66,6 @@ def local_variance(logps, k=5):
         np.max(vars)
     ], dtype=np.float64)
 
-def token_diversity(tokens):
-    val = len(set(tokens)) / len(tokens)
-    return np.array([val], dtype=np.float64)
-
 
 
 def readability_features(text):
@@ -84,41 +80,6 @@ def readability_features(text):
 
     return np.asarray(vals, dtype=np.float64)
 
-#def get_features(pythia_rec, gpt2_rec, text):   
-#    gpt2_sent = text
-#    gpt2_log_prob = gpt2_rec
-#    pythia_log_prob = pythia_rec
-#    # skip very short junk
-#    if len(gpt2_sent) < 5:
-#        return np.zeros(8, dtype=np.float64)
-#    if len(gpt2_log_prob) == 0 or len(gpt2_log_prob) == 0:
-#        return np.zeros(8, dtype=np.float64)
-#    sentences = split_sentences_max_words(gpt2_sent)
-#    sent_feats =[]
-#    for s in sentences:
-#        sent_feats.append(sentence_stats_features(s))
-#    sent_feats = np.vstack(sent_feats)
-#    sent_feats = np.mean(sent_feats, axis=0)    
-#    if len(gpt2_log_prob) == 0:
-#        return np.zeros(8, dtype=np.float64)
-#    # ---------- GPT2 features ----------
-#    gpt2_base = extract_word_features(gpt2_log_prob)
-#    #gpt2_intra = np.clip(np.var(gpt2_log_prob), 0, 5)
-#    #gpt2_burst = np.clip(get_burstiness(gpt2_log_prob), 0, 5)
-#    gpt2_feats = np.concatenate([gpt2_base])
-#    pythia_base = extract_word_features(pythia_log_prob)
-#    #pythia_intra = np.clip(np.var(pythia_log_prob), 0, 5)
-#    #pythia_burst = np.clip(get_burstiness(pythia_log_prob), 0, 5)
-#    pythia_feats = np.concatenate([pythia_base])
-#    pythia_perplexity = get_perplexity(pythia_log_prob)
-#    gpt2_perplexity = get_perplexity(gpt2_log_prob)
-#    disagree_val = cross_model_disagreement(pythia_perplexity, gpt2_perplexity)
-#    return np.concatenate([
-#        gpt2_feats,
-#        pythia_feats,
-#        [disagree_val],
-#        sent_feats
-#    ])
 
 def split_sentences_max_words(text, max_words=100):
     sentences = split_sentences(text)
@@ -229,26 +190,7 @@ def sentence_stats_features(sentence):
 
     return np.array([mean_rep, max_rep, max_len, min_len, word_std, word_var])
 
-def get_perplexity(log_probs):
-    log_probs = np.array(log_probs, dtype=np.float64)
-    return np.exp(-(log_probs))
 
-
-def cross_model_disagreement(lp_a, lp_b):
-    if len(lp_a) == 0 or len(lp_b) == 0:
-        return 0.0
-
-    # match lengths
-    n = min(len(lp_a), len(lp_b))
-    a = lp_a[:n]
-    b = lp_b[:n]
-
-    # normalize to comparable scale
-    a = (a - np.mean(a)) / (np.std(a) + 1e-8)
-    b = (b - np.mean(b)) / (np.std(b) + 1e-8)
-
-    # disagreement = average absolute difference
-    return float(np.mean(np.abs(a - b)))
 
 def skew(x):
     x = np.asarray(x)

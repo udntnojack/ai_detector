@@ -83,7 +83,7 @@ class DetectorApp(QMainWindow):
         if not text:
             return
     
-        # Disable UI (important)
+        # Disable UI 
         self.analyze_button.setEnabled(False)
     
         self.worker = EssayWorker(text)

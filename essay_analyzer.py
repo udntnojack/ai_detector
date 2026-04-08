@@ -28,7 +28,7 @@ lm_model = {
 
 MODEL_DIR = resource_path("classifiers")
 
-# always join paths so we don't accidentally concatenate without a separator
+# load models and scalers
 sentence_model = joblib.load(os.path.join(MODEL_DIR, "sentence_rf_detector_calibrated.joblib"))
 sentence_scaler = joblib.load(os.path.join(MODEL_DIR, "scaler_sentence_rf.joblib"))
 
@@ -94,9 +94,8 @@ def prepare_meta_features(texts, progress_callback=None):
     if len(p) < 3:
         return np.zeros(14)
 
-    # -----------------------------
-    # 🔥 CORE DISTRIBUTION FEATURES
-    # -----------------------------
+
+    #  core features
     dist_feats = np.array([
         p.mean(),                         # overall confidence
         p.std(),                          # spread
@@ -106,59 +105,51 @@ def prepare_meta_features(texts, progress_callback=None):
         entropy(p + 1e-8),                # randomness
     ])
 
-    # -----------------------------
-    # 🔥 LOW-PROBABILITY MASS (VERY IMPORTANT)
-    # -----------------------------
+
+    #  prob mass
     prop_feats = np.array([
-        np.mean(p < 0.05),                # strongest signal
+        np.mean(p < 0.05),               
         np.mean(p < 0.1),
         np.mean(p < 0.2),
     ])
 
-    # -----------------------------
-    # 🔥 CHUNK EXTREMES (KEY)
-    # -----------------------------
+
+    #  chunk features
     chunk_feats = get_chunk_features(p)
 
     chunk_min = chunk_feats.min(axis=0)
     
 
     chunk_selected = np.concatenate([
-        [chunk_min[2]],   # ✅ wrap
-        [chunk_min[5]],   # ✅ wrap
+        [chunk_min[2]],  
+        [chunk_min[5]],   
     ])
 
-    # -----------------------------
-    # 🔥 POSITION SIGNAL
-    # -----------------------------
+
+
     third = len(p) // 3
     if third > 0:
         pos_feats = np.array([
             p[:third].mean(),
-            p[-third:].mean(),  # end_mean (important)
+            p[-third:].mean(),  # end_mean
         ])
     else:
         pos_feats = np.zeros(2)
 
-    #prop_grad= np.array([
-    #    np.mean(np.diff(p)),
-    #    np.std(np.diff(p)),
-    #    np.max(np.abs(np.diff(p)))
-    #])
+
 
     low_mask = (p < 0.1).astype(int)
     max_run = max_consecutive_ones(low_mask)/ len(p)
 
-    # -----------------------------
-    # FINAL VECTOR
-    # -----------------------------
+
+    # return vector
+
     meta_features = np.concatenate([
         dist_feats,
         prop_feats,
         chunk_selected,
         pos_feats,
-        #prop_grad,
-        [max_run]   # wrap scalar
+        [max_run]  
     ])
 
     return meta_features.astype(np.float32)
@@ -252,38 +243,6 @@ def sentence_probs(text, progress_callback=None):
 
     return results
 
-def chunk_probs(text):
-    sentences = split_sentences_max_words(text)
-
-    if len(sentences) <= window:
-        chunks = [" ".join(sentences)]
-    else:
-        chunks = []
-        for j in range(0, len(sentences) - window + 1, 1):
-            chunks.append(" ".join(sentences[j:j+window]))
-
-    results = []
-
-    for c in chunks:
-            
-        tokens_gpt2, log_probs_gpt2 = get_batch_token_logprobs_and_tokens(lm_model["gpt2"], [c])[0]
-
-        feats = get_features(log_probs_gpt2, c)
-    
-        if feats is None:
-            continue
-
-        feats = feats.reshape(1, -1)  
-
-        prob = 0.0
-
-        results.append({
-            "chunk": c,
-            "prob": float(prob),
-            "length": len(c.split())
-        })
-
-    return results
 
 def predict_essay(text, progress_callback=None):
     sent_results = sentence_probs(text, progress_callback)
